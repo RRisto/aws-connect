@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 AWS Connect chatbot (chat only, no voice) for Estonian, English, and Russian, built with Terraform + Lambda.
 
-Architecture: **Amazon Connect → Lex V2 → Lambda**
+Architecture: **Amazon Connect → Lex V2 → Lambda → (Bedrock Knowledge Base + Nova Lite)**
 
 ## Repo layout
 
@@ -44,6 +44,21 @@ Connect instance provisioning takes ~15 minutes. The bot alias is created via `s
 - **`fulfillment_code_hook`** in `aws_lexv2models_intent` requires both `enabled = true` and `active = true`.
 - IAM roles created by Terraform must be prefixed `connect-bot-` to fall within the bootstrap user's scoped IAM permissions.
 
+## RAG (Retrieval-Augmented Generation)
+
+- Stack lives in `terraform/infra/rag.tf`: S3 docs bucket → Bedrock Knowledge Base (Cohere multilingual embeddings, 1024 dim) → Aurora Serverless v2 + pgvector.
+- **Vector store choice** — Aurora pgvector with auto-pause (`min_capacity = 0`, ~$0 idle). OpenSearch Serverless was rejected because of its $345/mo minimum.
+- **Lambda integration** — `lambda/handler.py` calls `bedrock-agent-runtime:Retrieve` (NOT `RetrieveAndGenerate`) before `bedrock-runtime:InvokeModel`, so the Nova Lite multilingual system prompt stays under our control. Retrieve failures degrade gracefully to no-context (try/except).
+- **Aurora schema** — Bedrock KB requires the exact table layout `bedrock_integration.bedrock_kb (id uuid, embedding vector(1024), chunks text, metadata jsonb)`. Created idempotently via `scripts/init_aurora_schema.py` using the RDS Data API. Run before KB creation; ordering is enforced via `null_resource.init_aurora_schema` → `aws_bedrockagent_knowledge_base.main` `depends_on`.
+- **Aurora engine version** — `16.13`. Aurora 15.4 (the version many tutorials use) is not available in `eu-central-1`. Check `aws rds describe-db-engine-versions --engine aurora-postgresql --region eu-central-1` before bumping.
+- **Bedrock model access** — the AWS console "Model access" page was retired in late 2025. Serverless models auto-enable on first invocation. Step 1 of the README shows the one-shot CLI calls that trigger this for Nova Lite and Cohere Embed Multilingual v3.
+- **Aurora cold start** — first message after auto-pause adds ~10–15s. Lambda timeout is 30s, which covers it.
+- **KB IAM role gotcha** — needs `rds:DescribeDBClusters` (not just `rds-data:*`). Without it, `aws_bedrockagent_knowledge_base` creation fails with a 403 from the validation phase even though the actual Data API connection would have worked.
+- **Security group descriptions are ASCII-only** — AWS rejects non-ASCII chars (em-dashes, smart quotes). Plain `-` only in the `description` field.
+- **Two-pass `terraform apply`** — the Lambda env-var update referencing `aws_bedrockagent_knowledge_base.main.id` fails on first apply with `Provider produced inconsistent final plan` (the count of `environment` blocks goes from 0 to 1 mid-apply). Re-run `terraform apply` immediately and it succeeds. Do not try to "fix" this in code — it's a known AWS provider limitation.
+- **Document workflow** — user uploads files to the docs bucket (`terraform output -raw docs_bucket_name`), then runs `scripts/sync_kb.py <kb-id> <region>` to trigger ingestion. Required after every doc change.
+- **Reply-language drift** — Nova Lite sometimes mirrors the language of retrieved chunks instead of the user's input language. Listed under "Future phases" in README; would be fixed by adding explicit language detection + instruction in `lambda/handler.py`.
+
 ## Scripts
 
 All scripts in `scripts/` are called by Terraform provisioners and are idempotent (check before creating):
@@ -53,6 +68,8 @@ All scripts in `scripts/` are called by Terraform provisioners and are idempoten
 | `build_bot_locale.py` | `null_resource.build_locales` in `lex.tf` | Builds a Lex locale and polls until `Built` |
 | `create_bot_alias.py` | `data "external" "bot_alias"` in `lex.tf` | Creates or queries the `live` alias, returns ARN as JSON |
 | `associate_lex_bot.py` | `null_resource.associate_lex` in `connect.tf` | Associates the Lex V2 alias with the Connect instance |
+| `init_aurora_schema.py` | `null_resource.init_aurora_schema` in `rag.tf` | Creates pgvector + Bedrock KB schema via RDS Data API (idempotent) |
+| `sync_kb.py` | run manually after uploading docs | Triggers Bedrock KB ingestion job and polls until complete |
 
 ## Terraform provider
 

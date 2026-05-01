@@ -34,15 +34,24 @@ resource "aws_iam_role_policy" "lambda_bedrock" {
 
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["bedrock:InvokeModel"]
-      Resource = [
-        "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.nova-lite-v1:0",
-        "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0",
-        "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/eu.amazon.nova-lite-v1:0",
-      ]
-    }]
+    Statement = [
+      {
+        Sid    = "InvokeNovaLite"
+        Effect = "Allow"
+        Action = ["bedrock:InvokeModel"]
+        Resource = [
+          "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.nova-lite-v1:0",
+          "arn:aws:bedrock:*::foundation-model/amazon.nova-lite-v1:0",
+          "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:inference-profile/eu.amazon.nova-lite-v1:0",
+        ]
+      },
+      {
+        Sid      = "RetrieveFromKnowledgeBase"
+        Effect   = "Allow"
+        Action   = ["bedrock:Retrieve"]
+        Resource = [aws_bedrockagent_knowledge_base.main.arn]
+      },
+    ]
   })
 }
 
@@ -57,6 +66,13 @@ resource "aws_lambda_function" "bot" {
   handler          = "handler.lambda_handler"
   runtime          = "python3.12"
   timeout          = 30
+  memory_size      = 256
+
+  environment {
+    variables = {
+      KNOWLEDGE_BASE_ID = aws_bedrockagent_knowledge_base.main.id
+    }
+  }
 }
 
 # Allow Lex V2 to invoke the function

@@ -70,12 +70,55 @@ resource "aws_iam_user_policy" "bot_builder" {
         Action   = ["logs:*"]
         Resource = "*"
       },
-      # S3 — Lambda deployment package storage
+      # S3 — Lambda deployment package storage + RAG docs bucket
       {
         Sid      = "S3FullAccess"
         Effect   = "Allow"
         Action   = ["s3:*"]
         Resource = "*"
+      },
+      # Bedrock Knowledge Base + foundation model access checks
+      {
+        Sid    = "BedrockFullAccess"
+        Effect = "Allow"
+        Action = [
+          "bedrock:*",
+        ]
+        Resource = "*"
+      },
+      # RDS Aurora Serverless v2 (vector store) + Data API for schema init
+      {
+        Sid    = "RDSAndDataAPI"
+        Effect = "Allow"
+        Action = [
+          "rds:*",
+          "rds-data:*",
+        ]
+        Resource = "*"
+      },
+      # Secrets Manager — Aurora master credentials (Bedrock KB requires it)
+      {
+        Sid      = "SecretsManagerFullAccess"
+        Effect   = "Allow"
+        Action   = ["secretsmanager:*"]
+        Resource = "*"
+      },
+      # EC2 — VPC, subnets, security groups, AZ lookup for Aurora
+      {
+        Sid      = "EC2VPC"
+        Effect   = "Allow"
+        Action   = ["ec2:*"]
+        Resource = "*"
+      },
+      # IAM service-linked roles — RDS and Bedrock create them automatically
+      {
+        Sid    = "IAMServiceLinkedRoles"
+        Effect = "Allow"
+        Action = [
+          "iam:CreateServiceLinkedRole",
+          "iam:GetRole",
+        ]
+        Resource = "arn:aws:iam::*:role/aws-service-role/*"
       },
     ]
   })

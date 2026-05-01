@@ -4,6 +4,7 @@
 *.tfstate
 *.tfstate.backup
 *.tfplan
+tfplan
 *.auto.tfvars
 
 # Lambda build artifacts
@@ -24,3 +25,9 @@ Thumbs.db
 .venv/
 __pycache__/
 *.pyc
+
+# Local Claude Code state
+.claude/
+
+# RAG documents — runtime data, not source
+docs/
