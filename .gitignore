@@ -19,3 +19,8 @@ response.json
 Thumbs.db
 .vscode/
 .idea/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
